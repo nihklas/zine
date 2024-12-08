@@ -3,8 +3,8 @@
     .version = "0.0.0",
     .dependencies = .{
         .supermd = .{
-            .url = "git+https://github.com/kristoff-it/supermd#a034ec48c8a01b26de50f479090716d3ed2152c9",
-            .hash = "122058e6f4ebd493d1c7f7c1e21549d2b2e5d9a1921dba758f3558d88a34a70384be",
+            .url = "git+https://github.com/kristoff-it/supermd#2260dce98037300d40b74462a7ea92525f5bb900",
+            .hash = "12206a2d7b0eb77aaa02348a06acea6df8b03075071fab668600f8a44ced23182cae",
         },
         .scripty = .{
             .url = "git+https://github.com/kristoff-it/scripty#df8c11380f9e9bec34809f2242fb116d27cf39d6",
@@ -27,17 +27,21 @@
             .hash = "12208720b772330f309cfb48957f4152ee0930b716837d0c1d07fee2dea2f4dc712e",
         },
         .zeit = .{
-            .url = "git+https://github.com/rockorager/zeit#10c8daf12c8d7ff51d1e56bf492fe5fa28116eaf",
-            .hash = "1220aeb0bd83285a72d784dbabfb400c6b75b3b38f37ca3fa386a52df63f3da7cecc",
+            .url = "git+https://github.com/rockorager/zeit?ref=v0.4.4#5041c7cac243f0d05f4578a334f52e12bb450e55",
+            .hash = "12204b653c90b503f89e2f1a73c4754b83fb7275c100c81872deaca12c9f17e334ec",
         },
         .@"flow-syntax" = .{
-            .url = "git+https://github.com/neurocyte/flow-syntax#d5b5da509350ef946b33cfb5c04ede68e288545b",
-            .hash = "122074a1a0a073213ae65d3f09863d6cb0622e1dbacf6a85e09a343e306c9da44c3b",
+            .url = "git+https://github.com/neurocyte/flow-syntax#9eb5c4c74daecec2a73654628c31b68d9908ec2e",
+            .hash = "122065eda677896d25cefbd042384a5b9236a3a4a3b58857ab66e22ade7777f8623f",
         },
         .@"zig-afl-kit" = .{
             .url = "git+https://github.com/kristoff-it/zig-afl-kit#f003bfe714f2964c90939fdc940d5993190a66ec",
             .hash = "1220f2d8402bb7bbc4786b9c0aad73910929ea209cbd3b063842371d68abfed33c1e",
             .lazy = true,
+        },
+        .wuffs = .{
+            .url = "git+https://github.com/allyourcodebase/wuffs#818c8ad6607dd5c1ee571362fdb9813b744ee548",
+            .hash = "1220e4ee09c4fa2d90a9cc7f34f14e04be55a779c84d486696fa9f9ab98ade35409d",
         },
     },
     .paths = .{"."},
