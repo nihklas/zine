@@ -28,14 +28,9 @@
             .url = "git+https://github.com/neurocyte/flow-syntax#d5c1cd2a328ec75fd9b0feddbc9eb84b5f590939",
             .hash = "flow_syntax-0.1.0-X8jOoZSdAADPlbyIxCpvEuiVCcPGVfSm_zRa8Ds7Jr3l",
         },
-        .afl_kit = .{
-            .url = "git+https://github.com/kristoff-it/zig-afl-kit#f003bfe714f2964c90939fdc940d5993190a66ec",
-            .hash = "1220f2d8402bb7bbc4786b9c0aad73910929ea209cbd3b063842371d68abfed33c1e",
-            .lazy = true,
-        },
         .wuffs = .{
             .url = "git+https://github.com/allyourcodebase/wuffs#818c8ad6607dd5c1ee571362fdb9813b744ee548",
-            .hash = "1220e4ee09c4fa2d90a9cc7f34f14e04be55a779c84d486696fa9f9ab98ade35409d",
+            .hash = "wuffs-0.4.0-alpha.9+3837.20240914-AAAAAFgPAADk7gnE-i2Qqcx_NPFOBL5Vp3nITUhmlvqf",
         },
         .ziggy = .{
             .url = "git+https://github.com/kristoff-it/ziggy#af41bdb5b1d64404c2ec7eb1d9de01083c0d2596",
@@ -44,6 +39,11 @@
         .lsp_kit = .{
             .url = "git+https://github.com/kristoff-it/zig-lsp-kit#87ff3d537a0c852442e180137d9557711963802c",
             .hash = "lsp_kit-0.1.0-hAAxO9S9AADv_5D0iplASFtNCFXAPk54M0u-3jj2MRFk",
+        },
+        .afl_kit = .{
+            .url = "git+https://github.com/nihklas/zig-afl-kit#c40d87753d3fc28275804f30f5359a4b7ad10781",
+            .hash = "zig_afl_kit-0.1.0-3k74fQAdAAC3Dirqem0LWMirHM4UNqKEriGgVMAak9_5",
+            .lazy = true,
         },
     },
     .paths = .{"."},
