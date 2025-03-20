@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.14.0",
     .dependencies = .{
         .supermd = .{
-            .url = "git+https://github.com/kristoff-it/supermd#369740f58459a88e398cded0ce3f86c508449603",
-            .hash = "supermd-0.1.0-3Mco3JN3VAA9U1WgcQT3SvBDH8kQP01Mn0ynIKqwG5WE",
+            .url = "git+https://github.com/nihklas/supermd#a88b8ee6238c1bd7d185e23b6ac30d16aa434476",
+            .hash = "supermd-0.1.0-3Mco3DRrWAARHmc1tqQ6D3cnIl3DzpFGUQo16NPkHQ3I",
         },
         .scripty = .{
             .url = "git+https://github.com/nihklas/scripty#0be3ddb0bd7de83f372b2d87fe3f4e30a84fe795",
