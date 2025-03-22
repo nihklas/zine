@@ -138,7 +138,7 @@ pub const Builtins = struct {
             var buf: std.ArrayListUnmanaged(u8) = .empty;
             const w = buf.writer(gpa);
             try ctx.printLinkPrefix(w, ctx.site._meta.variant_id, false);
-            if (buf.items.len > 0 and buf.items[buf.items.len - 1] != '/') {
+            if (buf.items.len == 0 or buf.items[buf.items.len - 1] != '/') {
                 try buf.append(gpa, '/');
             }
             return String.init(buf.items);
