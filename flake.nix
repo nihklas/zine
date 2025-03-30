@@ -46,9 +46,9 @@
       ...
     }: {
       default = pkgs.stdenvNoCC.mkDerivation {
-        # name = "name";
-        # version = "0.0.1";
-        # meta.mainProgram = "name";
+        name = "zine";
+        version = "0.0.0";
+        meta.mainProgram = "zine";
         src = pkgs.lib.cleanSource ./.;
         nativeBuildInputs = [zig];
         dontConfigure = true;
