@@ -1,8 +1,10 @@
 const std = @import("std");
 const supermd = @import("supermd");
 const tracy = @import("tracy");
+const root = @import("../root.zig");
 const hl = @import("../highlight.zig");
 const context = @import("../context.zig");
+const StringTable = @import("../StringTable.zig");
 const PathTable = @import("../PathTable.zig");
 const Path = PathTable.Path;
 const PathName = PathTable.PathName;
@@ -29,8 +31,8 @@ pub fn html(
     // Footnotes are disconnected from the main ast tree so we cannot
     // start an iterator from the document's root node when rendering
     // one (which happens on-demand by pointing `start` at a footnote node).
-    const root = if (start.nodeType() == .FOOTNOTE_DEFINITION) start else ast.md.root;
-    var it = Iter.init(root);
+    const root_node = if (start.nodeType() == .FOOTNOTE_DEFINITION) start else ast.md.root;
+    var it = Iter.init(root_node);
 
     const full_page = start.n == ast.md.root.n;
     var event: ?Iter.Event = if (!full_page) blk: {
@@ -43,8 +45,8 @@ pub fn html(
     var table_alignments: []const u8 = &.{};
     var table_cell_id: usize = 0;
     while (event) |ev| : (event = it.next()) {
-        const loop_zone = tracy.traceNamed(@src(), "html-event");
-        defer loop_zone.end();
+        // const loop_zone = tracy.traceNamed(@src(), "html-event");
+        // defer loop_zone.end();
 
         const node = ev.node;
         const node_is_section = if (node.getDirective()) |d|
@@ -52,11 +54,11 @@ pub fn html(
         else
             false;
 
-        var buf: [1024]u8 = undefined;
-        tracy.messageCopy(std.fmt.bufPrint(&buf, "{} {s}", .{
-            node.nodeType(),
-            @tagName(ev.dir),
-        }) catch unreachable);
+        // var buf: [1024]u8 = undefined;
+        // tracy.messageCopy(std.fmt.bufPrint(&buf, "{} {s}", .{
+        //     node.nodeType(),
+        //     @tagName(ev.dir),
+        // }) catch unreachable);
 
         log.debug("node ({}, {s}, {?s}) = {} {s} \n({*} == {*} {})", .{
             node_is_section,
@@ -533,7 +535,30 @@ fn printUrl(
 ) !void {
     switch (src) {
         .url => |url| try w.writeAll(url),
-        .self_page => |alt| if (alt) |a| try w.writeAll(a),
+        .self_page => |alt| if (alt) |a| {
+            try ctx.printLinkPrefix(
+                w,
+                page._scan.variant_id,
+                // We are not checking the variant id so two different pages
+                // might have the same id in different variant arrays, but we
+                // don't care because, when the variant is different, the full
+                // host url will be printed anyway.
+                // NOTE: `p.resolved.page_id` is not the same as `page._scan.page_id`
+                page != ctx.page,
+            );
+
+            if (a[0] != '/') {
+                const v = ctx._meta.build.variants[page._scan.variant_id];
+                try w.print("{}", .{page._scan.url.fmt(
+                    &v.string_table,
+                    &v.path_table,
+                    null,
+                    true,
+                )});
+            }
+
+            try w.writeAll(a);
+        },
         .page => |p| {
             try ctx.printLinkPrefix(
                 w,
@@ -546,12 +571,25 @@ fn printUrl(
                 page != ctx.page,
             );
 
+            const path: Path = @enumFromInt(p.resolved.path);
+            const v = ctx._meta.build.variants[p.resolved.variant_id];
             if (p.resolved.alt) |a| {
+                if (a[0] != '/') {
+                    try w.print("{}", .{path.fmt(
+                        &v.string_table,
+                        &v.path_table,
+                        null,
+                        true,
+                    )});
+                }
                 try w.writeAll(a);
             } else {
-                const path: Path = @enumFromInt(p.resolved.path);
-                const v = ctx._meta.build.variants[p.resolved.variant_id];
-                try w.print("{}", .{path.fmt(&v.string_table, &v.path_table, true)});
+                try w.print("{}", .{path.fmt(
+                    &v.string_table,
+                    &v.path_table,
+                    null,
+                    true,
+                )});
             }
         },
         .page_asset => |pa| {
@@ -567,9 +605,10 @@ fn printUrl(
             };
 
             const v = ctx._meta.build.variants[page._scan.variant_id];
-            try w.print("{}", .{pn.fmt(
+            try w.print("{/}", .{pn.fmt(
                 &v.string_table,
                 &v.path_table,
+                null,
             )});
         },
         .site_asset => |sa| {
@@ -580,9 +619,10 @@ fn printUrl(
                 .name = @enumFromInt(sa.resolved.name),
             };
 
-            try w.print("{}", .{pn.fmt(
+            try w.print("{/}", .{pn.fmt(
                 &ctx._meta.build.st,
                 &ctx._meta.build.pt,
+                null,
             )});
         },
         .build_asset => |ba| {
@@ -600,14 +640,14 @@ pub fn printAssetUrlPrefix(
     switch (ctx.site._meta.kind) {
         .simple => |url_prefix_path| {
             if (ctx.page != page) {
-                try w.print("{}/", .{
-                    std.fs.path.fmtJoin(&.{
+                try w.print("{/}/", .{
+                    root.fmtJoin(&.{
                         ctx.site.host_url,
-                        url_prefix_path orelse "",
+                        url_prefix_path,
                     }),
                 });
-            } else if (url_prefix_path) |upp| {
-                try w.print("/{s}/", .{upp});
+            } else if (url_prefix_path.len > 0) {
+                try w.print("/{s}/", .{url_prefix_path});
             } else {
                 try w.writeAll("/");
             }
@@ -615,7 +655,7 @@ pub fn printAssetUrlPrefix(
         .multi => |locale| {
             const assets_prefix_path = ctx._meta.build.cfg.Multilingual.assets_prefix_path;
             if (ctx.page != page or locale.host_url_override != null) {
-                try w.print("{}", .{
+                try w.print("{/}", .{
                     std.fs.path.fmtJoin(&.{
                         ctx.site.host_url,
                         assets_prefix_path,

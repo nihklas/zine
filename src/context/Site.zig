@@ -6,8 +6,8 @@ const utils = @import("utils.zig");
 const context = @import("../context.zig");
 const StringTable = @import("../StringTable.zig");
 const PathTable = @import("../PathTable.zig");
-const Build = @import("../Build.zig");
-const join = @import("../root.zig").join;
+const root = @import("../root.zig");
+const join = root.join;
 const Signature = @import("doctypes.zig").Signature;
 const PathName = PathTable.PathName;
 const Allocator = std.mem.Allocator;
@@ -23,8 +23,8 @@ title: []const u8,
 _meta: struct {
     variant_id: u32,
     kind: union(enum) {
-        simple: ?[]const u8, // url_path_prefix
-        multi: Build.Locale,
+        simple: []const u8, // url_path_prefix
+        multi: root.Locale,
     },
 },
 
@@ -169,7 +169,7 @@ pub const Builtins = struct {
                 else => return bad_arg,
             };
 
-            if (context.pathValidationError(ref, .{})) |err| return err;
+            if (root.validatePathMessage(ref, .{})) |msg| return .{ .err = msg };
 
             const st = &ctx._meta.build.st;
             const pt = &ctx._meta.build.pt;
@@ -229,7 +229,9 @@ pub const Builtins = struct {
                 else => return bad_arg,
             };
 
-            if (context.pathValidationError(ref, .{ .empty = true })) |err| return err;
+            if (root.validatePathMessage(ref, .{ .empty = true })) |msg| return .{
+                .err = msg,
+            };
 
             const variant = &ctx._meta.build.variants[site._meta.variant_id];
 

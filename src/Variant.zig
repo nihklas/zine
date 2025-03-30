@@ -6,7 +6,7 @@ const builtin = @import("builtin");
 const ziggy = @import("ziggy");
 const tracy = @import("tracy");
 const fatal = @import("fatal.zig");
-const worker = @import("standalone/worker.zig");
+const worker = @import("worker.zig");
 const context = @import("context.zig");
 const Build = @import("Build.zig");
 const StringTable = @import("StringTable.zig");
@@ -19,6 +19,7 @@ const String = StringTable.String;
 const Path = PathTable.Path;
 const PathName = PathTable.PathName;
 
+output_path_prefix: []const u8,
 /// Open for the full duration of the program.
 content_dir: std.fs.Dir,
 content_dir_path: []const u8,
@@ -40,6 +41,7 @@ collisions: std.ArrayListUnmanaged(Collision),
 i18n: context.Map.ZiggyMap,
 i18n_src: [:0]const u8,
 i18n_diag: ziggy.Diagnostic,
+i18n_arena: std.heap.ArenaAllocator.State,
 
 const Collision = struct {
     url: PathName,
@@ -81,14 +83,8 @@ pub const LocationHint = struct {
         ) !void {
             _ = options;
             const page = f.pages[f.lh.id];
+            try writer.print("{}", .{page._scan.file.fmt(f.st, f.pt, null)});
 
-            const path_slice = page._scan.md_path.slice(f.pt);
-            for (path_slice) |c| {
-                try writer.writeAll(c.slice(f.st));
-                try writer.writeAll("/");
-            }
-
-            try writer.writeAll(page._scan.md_name.slice(f.st));
             switch (f.lh.kind) {
                 .page_main => {
                     try writer.writeAll(" (main output)");
@@ -113,6 +109,13 @@ pub const Section = struct {
     parent_section: u32, // index into sections, 0 = no parent section
     index: u32, // index into pages
     pages: std.ArrayListUnmanaged(u32) = .empty, // indices into pages
+
+    pub fn deinit(s: *const Section, gpa: Allocator) void {
+        {
+            var p = s.pages;
+            p.deinit(gpa);
+        }
+    }
 
     pub fn activate(
         s: *Section,
@@ -143,6 +146,36 @@ pub const Section = struct {
     }
 };
 
+pub fn deinit(v: *const Variant, gpa: Allocator) void {
+    {
+        var dir = v.content_dir;
+        dir.close();
+    }
+    // content_dir_path is in cfg_arena
+    // gpa.free(v.content_dir_path);
+    v.string_table.deinit(gpa);
+    v.path_table.deinit(gpa);
+    for (v.sections.items) |s| s.deinit(gpa);
+    {
+        var s = v.sections;
+        s.deinit(gpa);
+    }
+    for (v.pages.items) |p| p.deinit(gpa);
+    {
+        var p = v.pages;
+        p.deinit(gpa);
+    }
+    {
+        var u = v.urls;
+        u.deinit(gpa);
+    }
+    {
+        var c = v.collisions;
+        c.deinit(gpa);
+    }
+    v.i18n_arena.promote(gpa).deinit();
+}
+
 pub const MultilingualScanParams = struct {
     i18n_dir: std.fs.Dir,
     i18n_dir_path: []const u8,
@@ -156,6 +189,7 @@ pub fn scanContentDir(
     content_dir_path: []const u8,
     variant_id: u32,
     multilingual: ?MultilingualScanParams,
+    output_path_prefix: []const u8,
 ) void {
     const zone = tracy.trace(@src());
     defer zone.end();
@@ -277,8 +311,11 @@ pub fn scanContentDir(
             const index_page = try pages.addOne(gpa);
             index_page._parse.active = false;
             index_page._scan = .{
-                .md_path = content_sub_path,
-                .md_name = index_smd,
+                .file = .{
+                    .path = content_sub_path,
+                    .name = index_smd,
+                },
+                .url = content_sub_path,
                 .page_id = page_id,
                 .subsection_id = current_section,
                 .parent_section_id = dir_entry.parent_section,
@@ -316,11 +353,30 @@ pub fn scanContentDir(
             page_names.items,
             pages_old_len..,
         ) |*sp, *p, f, idx| {
+            // If we don't do this here, later on the call to f.slice might
+            // return a pointer that gets invalidated when the string table
+            // is expanded.
+            try string_table.string_bytes.ensureUnusedCapacity(
+                gpa,
+                f.slice(&string_table).len + 1,
+            );
+            const page_url = try path_table.internExtend(
+                gpa,
+                content_sub_path,
+                try string_table.intern(
+                    gpa,
+                    std.fs.path.stem(f.slice(&string_table)), // TODO: extensionless page names?
+                ),
+            );
+
             sp.* = @intCast(idx);
             p._parse.active = false;
             p._scan = .{
-                .md_name = f,
-                .md_path = content_sub_path,
+                .file = .{
+                    .path = content_sub_path,
+                    .name = f,
+                },
+                .url = page_url,
                 .page_id = @intCast(idx),
                 .subsection_id = 0,
                 .parent_section_id = current_section,
@@ -330,30 +386,14 @@ pub fn scanContentDir(
                 p._debug = .{ .stage = .init(.scanned) };
             }
 
-            // If we don't do this here, later on the call to f.slice might
-            // return a pointer that gets invalidated when the string table
-            // is expanded.
-            try string_table.string_bytes.ensureUnusedCapacity(
-                gpa,
-                f.slice(&string_table).len + 1,
-            );
-            const page_path = try path_table.internExtend(
-                gpa,
-                content_sub_path,
-                try string_table.intern(
-                    gpa,
-                    std.fs.path.stem(f.slice(&string_table)), // TODO: extensionless page names?
-                ),
-            );
-
             log.debug("'{s}/{s}' -> [{d}] -> [{d}]", .{
                 dir_entry.path,
                 f.slice(&string_table),
-                page_path,
-                page_path.slice(&path_table),
+                page_url,
+                page_url.slice(&path_table),
             });
 
-            const pn: PathName = .{ .path = page_path, .name = index_html };
+            const pn: PathName = .{ .path = page_url, .name = index_html };
             const lh: LocationHint = .{ .id = @intCast(idx), .kind = .page_main };
             const gop = urls.getOrPutAssumeCapacity(pn);
 
@@ -418,11 +458,16 @@ pub fn scanContentDir(
     var i18n: context.Map.ZiggyMap = .{};
     var i18n_src: [:0]const u8 = "";
     var i18n_diag: ziggy.Diagnostic = .{ .path = null };
+    var i18n_arena = std.heap.ArenaAllocator.init(gpa);
     // Present when in a multilingual site
     if (multilingual) |ml| {
-        const name = try std.fmt.allocPrint(gpa, "{s}.ziggy", .{ml.locale_code});
+        const name = try std.fmt.allocPrint(
+            i18n_arena.allocator(),
+            "{s}.ziggy",
+            .{ml.locale_code},
+        );
         i18n_src = ml.i18n_dir.readFileAllocOptions(
-            gpa,
+            i18n_arena.allocator(),
             name,
             ziggy.max_size,
             0,
@@ -431,9 +476,12 @@ pub fn scanContentDir(
         ) catch |err| fatal.file(name, err);
 
         i18n_diag.path = name;
-        i18n = ziggy.parseLeaky(context.Map.ZiggyMap, gpa, i18n_src, .{
-            .diagnostic = &i18n_diag,
-        }) catch |err| switch (err) {
+        i18n = ziggy.parseLeaky(
+            context.Map.ZiggyMap,
+            i18n_arena.allocator(),
+            i18n_src,
+            .{ .diagnostic = &i18n_diag },
+        ) catch |err| switch (err) {
             error.OpenFrontmatter, error.MissingFrontmatter => unreachable,
             error.Overflow, error.OutOfMemory => return error.OutOfMemory,
             error.Syntax => .{
@@ -444,6 +492,7 @@ pub fn scanContentDir(
     }
 
     variant.* = .{
+        .output_path_prefix = output_path_prefix,
         .content_dir = content_dir,
         .content_dir_path = content_dir_path,
         .string_table = string_table,
@@ -456,6 +505,7 @@ pub fn scanContentDir(
         .i18n = i18n,
         .i18n_src = i18n_src,
         .i18n_diag = i18n_diag,
+        .i18n_arena = i18n_arena.state,
     };
 }
 
@@ -479,13 +529,11 @@ pub fn installAssets(
         if (hint.kind.page_asset.raw == 0) continue;
 
         var buf: [std.fs.max_path_bytes]u8 = undefined;
-        const path = buf[0..key.path.bytesSlice(
+        const path = std.fmt.bufPrint(&buf, "{}", .{key.fmt(
             &v.string_table,
             &v.path_table,
-            &buf,
-            std.fs.path.sep,
-            key.name,
-        )];
+            null,
+        )}) catch unreachable;
 
         _ = v.content_dir.updateFile(
             path,

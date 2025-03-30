@@ -7,6 +7,7 @@ const scripty = @import("scripty");
 const supermd = @import("supermd");
 const utils = @import("utils.zig");
 const tracy = @import("tracy");
+const root = @import("../root.zig");
 const fatal = @import("../fatal.zig");
 const render = @import("../render.zig");
 const Signature = @import("doctypes.zig").Signature;
@@ -34,7 +35,7 @@ pub const ziggy_options = struct {
         ._scan,
         ._parse,
         ._analysis,
-        ._meta,
+        ._render,
     };
 };
 
@@ -60,8 +61,8 @@ _debug: if (builtin.mode != .Debug) void else struct {
 
 /// Fields populated after scanning a variant.
 _scan: struct {
-    md_path: PathTable.Path,
-    md_name: StringTable.String,
+    file: PathName,
+    url: PathTable.Path,
     page_id: u32,
     subsection_id: u32, // 0 means no subsection
     parent_section_id: u32, // 0 means no parent section (only true for root index)
@@ -72,6 +73,9 @@ _scan: struct {
 /// All top-level fields are also available if status == success.
 _parse: struct {
     active: bool,
+
+    // Stores everything in parse except the cmark ast
+    arena: std.heap.ArenaAllocator.State,
     full_src: [:0]const u8,
     status: union(enum) {
         /// File is empty
@@ -97,29 +101,21 @@ _parse: struct {
     ast: supermd.Ast,
 } = undefined,
 
-// Valid if parse.status == .ok
+// Valid if parse.active = true and parse.status == .parsed
 _analysis: struct {
     frontmatter: std.ArrayListUnmanaged(FrontmatterAnalysisError) = .empty,
     page: std.ArrayListUnmanaged(PageAnalysisError) = .empty,
 } = .{},
 
-_meta: struct {
-    site: *const context.Site = undefined,
-    md_path: []const u8 = "",
-    md_rel_path: []const u8 = "",
-    md_asset_dir_path: []const u8 = "",
-    md_asset_dir_rel_path: []const u8 = "",
-
-    // true when this page has not been loaded via Scripty
-    is_root: bool = false,
-    parent_section_path: ?[]const u8 = null,
-    index_in_section: ?usize = null,
-    word_count: u64 = 0,
-    is_section: bool = false,
-    key_variants: []const Translation = &.{},
-    src: []const u8 = "",
-    ast: ?supermd.Ast = null,
-} = .{},
+// Valid if analysis contains no errors and build mode == .memory
+_render: struct {
+    out: []const u8 = "",
+    errors: []const u8 = "",
+    alternatives: []struct {
+        out: []const u8,
+        errors: []const u8,
+    },
+} = undefined,
 
 pub const PageAnalysisError = struct {
     node: supermd.Node,
@@ -311,6 +307,10 @@ pub const FrontmatterAnalysisError = union(enum) {
     };
 };
 
+pub fn deinit(p: *const Page, gpa: Allocator) void {
+    p._parse.arena.promote(gpa).deinit();
+}
+
 pub fn parse(
     p: *Page,
     gpa: Allocator,
@@ -321,30 +321,43 @@ pub fn parse(
     const zone = tracy.trace(@src());
     defer zone.end();
 
-    if (builtin.mode == .Debug) {
-        const last = p._debug.stage.swap(.parsed, .acq_rel);
-        assert(last == .scanned);
-    }
-
     errdefer |err| switch (err) {
         error.OutOfMemory => fatal.oom(),
     };
 
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path_bytes = buf[0..p._scan.md_path.bytesSlice(
-        &variant.string_table,
-        &variant.path_table,
-        &buf,
-        std.fs.path.sep,
-        p._scan.md_name,
-    )];
+    // const path_bytes = buf[0..p._scan.path.bytesSlice(
+    //     &variant.string_table,
+    //     &variant.path_table,
+    //     &buf,
+    //     std.fs.path.sep,
+    //     p._scan.name,
+    // )];
+
+    const path_bytes = std.fmt.bufPrint(&buf, "{}", .{
+        p._scan.file.fmt(
+            &variant.string_table,
+            &variant.path_table,
+            null,
+        ),
+    }) catch unreachable;
+
+    if (builtin.mode == .Debug) {
+        const last = p._debug.stage.swap(.parsed, .acq_rel);
+        assert(last == .scanned);
+
+        tracy.messageCopy(path_bytes);
+    }
 
     const maybe_pr = if (progress) |parent| parent.start(path_bytes, 1) else null;
     defer if (maybe_pr) |pr| pr.end();
 
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    const arena = arena_state.allocator();
+
     const max = std.math.maxInt(u32);
     const full_src = variant.content_dir.readFileAllocOptions(
-        gpa,
+        arena,
         path_bytes,
         max,
         null,
@@ -354,6 +367,7 @@ pub fn parse(
 
     if (full_src.len == 0) {
         p._parse = .{
+            .arena = arena_state.state,
             .active = true,
             .full_src = full_src,
             .status = .empty,
@@ -374,7 +388,7 @@ pub fn parse(
 
     var fm: ziggy.FrontmatterMeta = .{};
     var diag: ziggy.Diagnostic = .{ .path = null };
-    p.* = ziggy.parseLeaky(Page, gpa, full_src, .{
+    p.* = ziggy.parseLeaky(Page, arena, full_src, .{
         .diagnostic = &diag,
         .frontmatter_meta = &fm,
     }) catch |err| switch (err) {
@@ -382,6 +396,7 @@ pub fn parse(
         error.MissingFrontmatter, error.OpenFrontmatter => |fm_err| {
             p._parse = .{
                 .active = true,
+                .arena = arena_state.state,
                 .full_src = full_src,
                 .fm = fm,
                 .status = .{ .frontmatter = fm_err },
@@ -392,6 +407,7 @@ pub fn parse(
         error.Syntax => {
             p._parse = .{
                 .active = true,
+                .arena = arena_state.state,
                 .full_src = full_src,
                 .fm = fm,
                 .status = .{ .ziggy = diag },
@@ -409,6 +425,7 @@ pub fn parse(
 
     p._parse = .{
         .active = !p.draft,
+        .arena = arena_state.state,
         .full_src = full_src,
         .fm = fm,
         .ast = ast,
@@ -426,7 +443,13 @@ pub const Alternative = struct {
     layout: []const u8,
     output: []const u8,
     type: []const u8 = "",
-    _prefix: []const u8 = "",
+    _page: *const Page = undefined,
+
+    pub const ziggy_options = struct {
+        pub const skip_fields: []const std.meta.FieldEnum(Alternative) = &.{
+            ._page,
+        };
+    };
 
     pub const dot = scripty.defaultDot(Alternative, Value, false);
     // pub const PassByRef = true;
@@ -473,19 +496,31 @@ pub const Alternative = struct {
             pub fn call(
                 alt: Alternative,
                 gpa: Allocator,
-                _: *const context.Template,
+                ctx: *const context.Template,
                 args: []const Value,
             ) !Value {
                 if (args.len != 0) return .{ .err = "expected 0 arguments" };
 
-                const result = try join(gpa, &.{
-                    "/",
-                    alt._prefix,
-                    alt.output,
-                    "/",
+                const p = alt._page;
+                const v = &ctx._meta.build.variants[p._scan.variant_id];
+
+                var buf: std.ArrayListUnmanaged(u8) = .empty;
+                const w = buf.writer(gpa);
+
+                try ctx.printLinkPrefix(w, p._scan.variant_id, false);
+
+                if (alt.output[0] != '/') try w.print("{}", .{
+                    p._scan.url.fmt(
+                        &v.string_table,
+                        &v.path_table,
+                        null,
+                        true,
+                    ),
                 });
 
-                return String.init(result);
+                try w.writeAll(alt.output);
+
+                return String.init(buf.items);
             }
         };
     };
@@ -526,7 +561,7 @@ pub const Footnote = struct {
                 if (args.len != 0) return .{ .err = "expected 0 arguments" };
 
                 var buf = std.ArrayList(u8).init(gpa);
-                const ast = f._page._meta.ast.?;
+                const ast = f._page._parse.ast;
                 const node = ast.footnotes.values()[f._idx].node;
 
                 try render.html(
@@ -629,12 +664,12 @@ pub const Builtins = struct {
         pub fn call(
             p: *const Page,
             gpa: Allocator,
-            _: *const context.Template,
+            ctx: *const context.Template,
             args: []const Value,
         ) !Value {
             _ = gpa;
             if (args.len != 0) return .{ .err = "expected 0 arguments" };
-            return Bool.init(p._meta.is_root);
+            return Bool.init(p == ctx.page);
         }
     };
 
@@ -665,10 +700,6 @@ pub const Builtins = struct {
             ctx: *const context.Template,
             args: []const Value,
         ) !Value {
-            if (!p._meta.is_root) return .{
-                .err = "accessing assets of other pages has not been implemented yet, sorry!",
-            };
-
             const bad_arg: Value = .{
                 .err = "expected 1 string argument",
             };
@@ -679,7 +710,7 @@ pub const Builtins = struct {
                 else => return bad_arg,
             };
 
-            if (context.pathValidationError(ref, .{})) |err| return err;
+            if (root.validatePathMessage(ref, .{})) |msg| return .{ .err = msg };
 
             const v = &ctx._meta.build.variants[p._scan.variant_id];
             const st = &v.string_table;
@@ -691,14 +722,9 @@ pub const Builtins = struct {
                         .page_asset => {
                             if (hint.id != p._scan.page_id) {
                                 const other_page = &v.pages.items[hint.id];
-                                const page_pn: PathName = .{
-                                    .path = other_page._scan.md_path,
-                                    .name = other_page._scan.md_name,
-                                };
-
-                                return Value.errFmt(gpa, "page asset '{s}' exists but belongs to page '{s}', to reference an asset that belongs to another page you must access it through that page (see page accessing functions in SuperHTML Scripty docs)", .{
+                                return Value.errFmt(gpa, "page asset '{s}' exists but belongs to page '{}', to reference an asset that belongs to another page you must access it through that page (see page accessing functions in SuperHTML Scripty docs)", .{
                                     ref,
-                                    page_pn.fmt(st, pt),
+                                    other_page._scan.file.fmt(st, pt, v.content_dir_path),
                                 });
                             }
                         },
@@ -776,20 +802,18 @@ pub const Builtins = struct {
                 .{code},
             );
 
-            const index_smd: StringTable.String = @enumFromInt(1);
             const index_html: StringTable.String = @enumFromInt(11);
 
             const v = &ctx._meta.build.variants[p._scan.variant_id];
 
             var buf: [std.fs.max_path_bytes]u8 = undefined;
-            const page_url = std.fmt.bufPrint(&buf, "{}/{s}", .{
-                p._scan.md_path.fmt(&v.string_table, &v.path_table, false),
-                if (p._scan.md_name != index_smd)
-                    std.fs.path.stem(p._scan.md_name.slice(
-                        &v.string_table,
-                    ))
-                else
-                    "",
+            const page_url = std.fmt.bufPrint(&buf, "{}", .{
+                p._scan.url.fmt(
+                    &v.string_table,
+                    &v.path_table,
+                    null,
+                    false,
+                ),
             }) catch unreachable;
 
             const vv = ctx._meta.build.variants[other_variant_id];
@@ -862,20 +886,17 @@ pub const Builtins = struct {
                 .{code},
             );
 
-            const index_smd: StringTable.String = @enumFromInt(1);
             const index_html: StringTable.String = @enumFromInt(11);
-
             const v = &ctx._meta.build.variants[p._scan.variant_id];
 
             var buf: [std.fs.max_path_bytes]u8 = undefined;
-            const page_url = std.fmt.bufPrint(&buf, "{}/{s}", .{
-                p._scan.md_path.fmt(&v.string_table, &v.path_table, false),
-                if (p._scan.md_name != index_smd)
-                    std.fs.path.stem(p._scan.md_name.slice(
-                        &v.string_table,
-                    ))
-                else
-                    "",
+            const page_url = std.fmt.bufPrint(&buf, "{}", .{
+                p._scan.url.fmt(
+                    &v.string_table,
+                    &v.path_table,
+                    null,
+                    false,
+                ),
             }) catch unreachable;
 
             const vv = ctx._meta.build.variants[other_variant_id];
@@ -912,20 +933,18 @@ pub const Builtins = struct {
         ) !Value {
             if (args.len != 0) return .{ .err = "expected 0 arguments" };
 
-            const index_smd: StringTable.String = @enumFromInt(1);
             const index_html: StringTable.String = @enumFromInt(11);
 
             const v = &ctx._meta.build.variants[p._scan.variant_id];
 
             var buf: [std.fs.max_path_bytes]u8 = undefined;
-            const page_url = std.fmt.bufPrint(&buf, "{}/{s}", .{
-                p._scan.md_path.fmt(&v.string_table, &v.path_table, false),
-                if (p._scan.md_name != index_smd)
-                    std.fs.path.stem(p._scan.md_name.slice(
-                        &v.string_table,
-                    ))
-                else
-                    "",
+            const page_url = std.fmt.bufPrint(&buf, "{}", .{
+                p._scan.url.fmt(
+                    &v.string_table,
+                    &v.path_table,
+                    null,
+                    false,
+                ),
             }) catch unreachable;
 
             var pages: std.ArrayListUnmanaged(Value) = .empty;
@@ -963,14 +982,18 @@ pub const Builtins = struct {
             \\<div :loop="$page.wordCount()"></div>
         ;
         pub fn call(
-            self: *const Page,
+            page: *const Page,
             gpa: Allocator,
             _: *const context.Template,
             args: []const Value,
         ) !Value {
             _ = gpa;
             if (args.len != 0) return .{ .err = "expected 0 arguments" };
-            return .{ .int = .{ .value = @intCast(self._meta.word_count) } };
+            return .{
+                .int = .{
+                    .value = @intCast(page._parse.full_src[page._parse.fm.offset..].len / 6),
+                },
+            };
         }
     };
 
@@ -1016,14 +1039,14 @@ pub const Builtins = struct {
             \\$page.isSection()
         ;
         pub fn call(
-            self: *const Page,
+            page: *const Page,
             gpa: Allocator,
             _: *const context.Template,
             args: []const Value,
         ) !Value {
             _ = gpa;
             if (args.len != 0) return .{ .err = "expected 0 arguments" };
-            return Bool.init(self._meta.is_section);
+            return Bool.init(page._scan.subsection_id != 0);
         }
     };
 
@@ -1286,27 +1309,20 @@ pub const Builtins = struct {
             if (args.len != 0) return .{ .err = "expected 0 arguments" };
 
             const v = &ctx._meta.build.variants[p._scan.variant_id];
-            const index_smd: StringTable.String = @enumFromInt(1);
 
             var buf: std.ArrayListUnmanaged(u8) = .empty;
             const w = buf.writer(gpa);
 
             try ctx.printLinkPrefix(w, p._scan.variant_id, false);
 
-            const empty_path: Path = @enumFromInt(0);
-            const path = p._scan.md_path;
-            if (path != empty_path) {
-                try w.print("{s}/", .{
-                    p._scan.md_path.fmt(&v.string_table, &v.path_table, false),
-                });
-            }
-
-            const name = p._scan.md_name;
-            if (name != index_smd) {
-                try w.print("{s}/", .{
-                    std.fs.path.stem(p._scan.md_name.slice(&v.string_table)),
-                });
-            }
+            try w.print("{}", .{
+                p._scan.url.fmt(
+                    &v.string_table,
+                    &v.path_table,
+                    null,
+                    true,
+                ),
+            });
 
             return String.init(buf.items);
         }
@@ -1334,7 +1350,7 @@ pub const Builtins = struct {
         pub fn call(
             p: *const Page,
             gpa: Allocator,
-            _: *const context.Template,
+            ctx: *const context.Template,
             args: []const Value,
         ) !Value {
             const bad_arg: Value = .{
@@ -1347,28 +1363,32 @@ pub const Builtins = struct {
                 else => return bad_arg,
             };
 
-            const ast = p._meta.ast.?;
+            const ast = p._parse.ast;
             if (!ast.ids.contains(elem_id)) return Value.errFmt(
                 gpa,
-                "cannot find id ='{s}' in the content page",
+                "cannot find id '{s}' in the content page",
                 .{elem_id},
             );
 
-            const relp = p._meta.md_rel_path;
-            const path = switch (p._meta.is_section) {
-                true => relp[0 .. relp.len - "index.smd".len],
-                false => relp[0 .. relp.len - ".smd".len],
-            };
+            const v = &ctx._meta.build.variants[p._scan.variant_id];
 
-            const fragment = try std.fmt.allocPrint(gpa, "#{s}", .{elem_id});
-            const result = try join(gpa, &.{
-                "/",
-                // p._meta.site._meta.url_path_prefix,
-                path,
-                fragment,
+            var buf: std.ArrayListUnmanaged(u8) = .empty;
+            const w = buf.writer(gpa);
+
+            try ctx.printLinkPrefix(w, p._scan.variant_id, false);
+
+            try w.print("{}", .{
+                p._scan.url.fmt(
+                    &v.string_table,
+                    &v.path_table,
+                    null,
+                    true,
+                ),
             });
 
-            return String.init(result);
+            try w.print("#{s}", .{elem_id});
+
+            return String.init(buf.items);
         }
     };
 
@@ -1430,7 +1450,7 @@ pub const Builtins = struct {
             if (args.len != 0) return .{ .err = "expected 0 arguments" };
 
             var buf = std.ArrayList(u8).init(gpa);
-            const ast = p._meta.ast orelse unreachable;
+            const ast = p._parse.ast;
 
             try render.html(
                 gpa,
@@ -1470,9 +1490,7 @@ pub const Builtins = struct {
                 else => return bad_arg,
             };
 
-            const ast = p._meta.ast orelse return .{
-                .err = "only the main page can be rendered for now",
-            };
+            const ast = p._parse.ast;
             var buf = std.ArrayList(u8).init(gpa);
 
             const node = ast.ids.get(section_id) orelse {
@@ -1529,9 +1547,8 @@ pub const Builtins = struct {
                 else => return bad_arg,
             };
 
-            const ast = p._meta.ast orelse return .{
-                .err = "only the main page can be rendered for now",
-            };
+            const ast = p._parse.ast;
+
             // a true value indicates that `contentSection` will not error
             const has_section = blk: {
                 const section = ast.ids.get(section_id) orelse break :blk false;
@@ -1568,7 +1585,7 @@ pub const Builtins = struct {
             };
             if (args.len != 0) return bad_arg;
 
-            const ast = p._meta.ast.?;
+            const ast = p._parse.ast;
 
             var sections = std.ArrayList(ContentSection).init(gpa);
             var it = ast.ids.iterator();
@@ -1619,7 +1636,7 @@ pub const Builtins = struct {
             };
             if (args.len != 0) return bad_arg;
 
-            const ast = p._meta.ast.?;
+            const ast = p._parse.ast;
             if (ast.footnotes.count() == 0) {
                 return Optional.Null;
             }
@@ -1655,9 +1672,7 @@ pub const Builtins = struct {
             };
             if (args.len != 0) return bad_arg;
 
-            const ast = p._meta.ast orelse return .{
-                .err = "only the main page can be rendered for now",
-            };
+            const ast = p._parse.ast;
             var buf = std.ArrayList(u8).init(gpa);
             try render.htmlToc(ast, buf.writer());
 
@@ -1713,18 +1728,6 @@ pub const ContentSection = struct {
                     return err;
                 }
 
-                // const link_node = cs._node.firstChild() orelse {
-                //     return err;
-                // };
-
-                // const text_node = link_node.firstChild() orelse {
-                //     return err;
-                // };
-
-                // const text = text_node.literal() orelse {
-                //     return err;
-                // };
-
                 const text = try cs._node.renderPlaintext();
 
                 return String.init(text);
@@ -1754,13 +1757,7 @@ pub const ContentSection = struct {
                     return Optional.Null;
                 }
 
-                const link_node = cs._node.firstChild() orelse {
-                    return Optional.Null;
-                };
-
-                const text = link_node.literal() orelse {
-                    return Optional.Null;
-                };
+                const text = try cs._node.renderPlaintext();
 
                 return Optional.init(gpa, String.init(text));
             }
@@ -1795,6 +1792,48 @@ pub const ContentSection = struct {
                     cs._node,
                     buf.writer(),
                 );
+                return String.init(try buf.toOwnedSlice());
+            }
+        };
+
+        pub const htmlNoHeading = struct {
+            pub const signature: Signature = .{ .ret = .String };
+            pub const docs_description =
+                \\Renders the section but omits the section heading if present.
+            ;
+            pub const examples =
+                \\<div :html="$loop.it.htmlNoHeading()"></div>
+            ;
+            pub fn call(
+                cs: ContentSection,
+                gpa: Allocator,
+                ctx: *const context.Template,
+                args: []const Value,
+            ) !Value {
+                const bad_arg: Value = .{
+                    .err = "expected 0 arguments",
+                };
+                if (args.len != 0) return bad_arg;
+
+                var buf = std.ArrayList(u8).init(gpa);
+
+                log.debug("rendering content section [#{s}]", .{cs.id});
+
+                const node = switch (cs._node.nodeType()) {
+                    .HEADING => cs._node.nextSibling() orelse {
+                        return String.init("");
+                    },
+                    else => cs._node,
+                };
+
+                try render.html(
+                    gpa,
+                    ctx,
+                    cs._page,
+                    node,
+                    buf.writer(),
+                );
+
                 return String.init(try buf.toOwnedSlice());
             }
         };

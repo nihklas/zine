@@ -4,8 +4,6 @@ const log = std.log.scoped(.websockets);
 
 pub const Connection = struct {
     stream: std.net.Stream,
-    write_lock: std.Thread.Mutex = .{},
-    closed: bool = false,
 
     pub fn init(request: *std.http.Server.Request) !Connection {
         var it = request.iterateHeaders();
@@ -60,7 +58,11 @@ pub const Connection = struct {
     };
 
     /// Thread safe, lock ensures one message sent at a time.
-    pub fn writeMessage(conn: *Connection, bytes: []const u8, kind: MessageKind) !void {
+    pub fn writeMessage(
+        conn: *const Connection,
+        bytes: []const u8,
+        kind: MessageKind,
+    ) !void {
         // NOT named `write` because websockets is a message protocol, not a stream protocol.
 
         const op_code: Header.OpCode = switch (kind) {
@@ -77,22 +79,19 @@ pub const Connection = struct {
         try conn.writeWithHeader(header, bytes);
     }
 
-    fn writeWithHeader(conn: *Connection, header: Header, payload: []const u8) !void {
+    fn writeWithHeader(
+        conn: *const Connection,
+        header: Header,
+        payload: []const u8,
+    ) !void {
         const writer = conn.stream.writer();
-
-        conn.write_lock.lock();
-        defer conn.write_lock.unlock();
-
-        if (conn.closed) {
-            return error.ConnectionClosed;
-        }
 
         try header.write(writer);
         try writer.writeAll(payload);
     }
 
     /// Not thread safe, must be only called by one thread at a time.
-    pub fn readMessage(conn: *Connection, buffer: []u8) ![]u8 {
+    pub fn readMessage(conn: *const Connection, buffer: []u8) ![]u8 {
         // NOT named `read` because websockets is a message protocol, not a stream protocol.
 
         const reader = conn.stream.reader();
@@ -140,14 +139,8 @@ pub const Connection = struct {
         }
     }
 
-    pub fn close(conn: *Connection) void {
-        conn.write_lock.lock();
-        defer conn.write_lock.unlock();
-
-        if (!conn.closed) {
-            conn.stream.close();
-            conn.closed = true;
-        }
+    pub fn close(conn: *const Connection) void {
+        conn.stream.close();
     }
 };
 
