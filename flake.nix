@@ -1,9 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
-
-    zig-overlay.url = "github:mitchellh/zig-overlay";
-    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     zls.url = "github:zigtools/zls/0.14.0";
     zls.inputs.nixpkgs.follows = "nixpkgs";
@@ -11,7 +8,6 @@
 
   outputs = {
     nixpkgs,
-    zig-overlay,
     zls,
     ...
   }: let
@@ -22,19 +18,17 @@
           inherit system;
           target = builtins.replaceStrings ["darwin"] ["macos"] system;
           pkgs = nixpkgs.legacyPackages.${system};
-          zig = zig-overlay.packages.${system}."0.14.0";
         });
   in {
     devShells = eachSystem ({
       system,
       pkgs,
-      zig,
       ...
     }: {
       default = pkgs.mkShellNoCC {
         packages = [
           zls.packages.${system}.default
-          zig
+          pkgs.zig_0_14
         ];
       };
     });
@@ -42,7 +36,6 @@
     packages = eachSystem ({
       pkgs,
       target,
-      zig,
       ...
     }: {
       default = pkgs.stdenvNoCC.mkDerivation {
@@ -50,14 +43,14 @@
         version = "0.0.0";
         meta.mainProgram = "zine";
         src = pkgs.lib.cleanSource ./.;
-        nativeBuildInputs = [zig];
+        nativeBuildInputs = [pkgs.zig_0_14];
         dontConfigure = true;
         dontInstall = true;
         dontCheck = true;
         buildPhase = ''
           NO_COLOR=1 # prevent escape codes from messing up the `nix log`
           PACKAGE_DIR=${pkgs.callPackage ./deps.nix {zig = pkgs.zig;}}
-          zig build install --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dtarget=${target} -Doptimize=ReleaseSafe --prefix $out
+          zig build install --global-cache-dir $(pwd)/.cache --system $PACKAGE_DIR -Dtarget=${target} -Doptimize=ReleaseFast --prefix $out
         '';
       };
     });
