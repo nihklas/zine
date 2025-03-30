@@ -42,7 +42,7 @@
             .hash = "flow_syntax-0.1.0-X8jOoUX-AADI9WdOuVSYK9yjyBOTFj4UicSapF7QQssd",
         },
         .wuffs = .{
-            .url = "git+https://github.com/nihklas/wuffs#4cdb3c258d421f35556893b93df719c2890a2f2c",
+            .url = "git+https://github.com/allyourcodebase/wuffs#3646d8efae3f042ccbf552263ac6b2af738bdaa7",
             .hash = "wuffs-0.4.0-alpha.9+3837.20240914-3CHJgWsPAADpG9AWvKJ8ZxQ-t2IcnPEYVi_FD_o-qxjD",
         },
         .frameworks = .{

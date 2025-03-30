@@ -259,9 +259,9 @@ linkFarm name [
     name = "wuffs-0.4.0-alpha.9+3837.20240914-3CHJgWsPAADpG9AWvKJ8ZxQ-t2IcnPEYVi_FD_o-qxjD";
     path = fetchZigArtifact {
       name = "wuffs";
-      url = "git+https://github.com/nihklas/wuffs#4cdb3c258d421f35556893b93df719c2890a2f2c";
+      url = "git+https://github.com/allyourcodebase/wuffs#3646d8efae3f042ccbf552263ac6b2af738bdaa7";
       hash = "sha256-G0vZdfjW6CAcjOrwaujvvn9Gxw4VxIFi2wlwu2bRLT4=";
-      rev = "4cdb3c258d421f35556893b93df719c2890a2f2c";
+      rev = "3646d8efae3f042ccbf552263ac6b2af738bdaa7";
     };
   }
   {
