@@ -9,8 +9,8 @@
             .hash = "ziggy-0.1.0-kTg8vwkbBgAOHreabwZtDDtNDi3U_RAiOMvuRDTJiy0I",
         },
         .afl_kit = .{
-            .url = "git+https://github.com/kristoff-it/zig-afl-kit#f003bfe714f2964c90939fdc940d5993190a66ec",
-            .hash = "1220f2d8402bb7bbc4786b9c0aad73910929ea209cbd3b063842371d68abfed33c1e",
+            .url = "git+https://github.com/nihklas/zig-afl-kit#676a439919c8ed736a84097f483d47d679f7e9df",
+            .hash = "zig_afl_kit-0.1.0-3k74fQAdAABrirJM84Lo-lnl9mnUMwtJCSPPyIJ0OzAr",
             .lazy = true,
         },
         .lsp_kit = .{
@@ -18,8 +18,8 @@
             .hash = "lsp_kit-0.1.0-hAAxO9S9AADv_5D0iplASFtNCFXAPk54M0u-3jj2MRFk",
         },
         .scripty = .{
-            .url = "git+https://github.com/kristoff-it/scripty#57056571abcc6fe69fcb171c10b0c9e5962f53b0",
-            .hash = "scripty-0.1.0-LKK5O9jDAADwZbkwkzYcmtTD3xIStr1SNYWL0kcGf8sk",
+            .url = "git+https://github.com/nihklas/scripty#1d7380fb61b7876823fd73962029888e0e41cc9d",
+            .hash = "scripty-0.1.0-LKK5O8nDAADpuHWCt9Lar0LXr35wPjRS5a0BvopRdMYr",
         },
         .tracy = .{
             .url = "git+https://github.com/kristoff-it/tracy#67d2d89e351048c76fc6d161e0ac09d8a831dc60",
@@ -47,12 +47,12 @@
             .lazy = true,
         },
         .superhtml = .{
-            .url = "git+https://github.com/kristoff-it/superhtml#16887e9fa3122c36a3d4942470e33c1c282fe859",
-            .hash = "superhtml-0.4.0-Y7MdPKeXDQD6PoBdAJL8JlNYHk8kH0rcIbRjEfmKTj5r",
+            .url = "git+https://github.com/nihklas/superhtml#a976f30cecdf13bddadb5e96571ef55f19850556",
+            .hash = "superhtml-0.4.0-Y7MdPJCXDQB0zB9WVXeCJB7nh6Tw-wlgwDU9Se3IhDQD",
         },
         .supermd = .{
-            .url = "git+https://github.com/kristoff-it/supermd#46f885cf161fe6d16eb254969f618e4166df9c22",
-            .hash = "supermd-0.1.0-3Mco3M5zWAC595KZDzLA081r666kXuZLE7FX59No_BnM",
+            .url = "git+https://github.com/nihklas/supermd#3bbbad8626f7937bb4d41402a65cebac9677c5f2",
+            .hash = "supermd-0.1.0-3Mco3MZzWAANEC4_RgXf_8RFSB16smVq8jmIuBvaBTuc",
         },
     },
     .paths = .{"."},
